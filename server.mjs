@@ -263,15 +263,23 @@ app.get('/', (_,res)=>res.send('Donde Toño · agente activo'));
 // ───────── Sin webhook (cuenta trial): se consultan los mensajes entrantes por la API de Twilio
 const INICIO = new Date(Date.now() - 20000);
 const vistos = new Set();
-let sondeando = false;
+let sondeando = false, ultimoLog = 0;
+// Render gratis se duerme sin visitas externas: el servicio se visita a sí mismo cada 10 min
+const SELF_URL = process.env.RENDER_EXTERNAL_URL || PUBLIC_URL;
+if(SELF_URL) setInterval(()=>fetch(SELF_URL).catch(()=>{}), 10*60e3);
 async function sondear(){
   if(sondeando) return; sondeando = true;
   try{
     const ms = await tw.messages.list({ to: TWILIO_WHATSAPP_FROM, dateSentAfter: new Date(Date.now() - 36*3600e3), limit: 40 });
+    if(Date.now() - ultimoLog > 30000){
+      ultimoLog = Date.now();
+      console.log(`[sondeo] ${ms.length} mensajes recientes; entrantes: ${ms.filter(m=>m.direction==='inbound').length}; direcciones: ${[...new Set(ms.map(m=>m.direction))].join(',')}`);
+    }
     const nuevos = ms.filter(m => m.direction==='inbound' && new Date(m.dateCreated) >= INICIO && !vistos.has(m.sid))
                      .sort((a,b)=>new Date(a.dateCreated)-new Date(b.dateCreated));
     for(const m of nuevos){
       vistos.add(m.sid);
+      console.log(`[entrante] ${m.from}: ${(m.body||'').slice(0,80)}`);
       const texto = (m.body||'').trim();
       if(!texto || /^join\s/i.test(texto)) continue;
       if(procesando.has(m.from)){ vistos.delete(m.sid); continue; }   // se reintenta en el siguiente ciclo
